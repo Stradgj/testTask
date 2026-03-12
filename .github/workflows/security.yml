@@ -57,15 +57,14 @@ jobs:
       - name: Semgrep scan
         run: |
           semgrep scan \
-            --config=auto \
+            --config=p/default \
+            --config=p/security-audit \
             --json \
             --output=semgrep-report.json \
             --error \
             --severity=ERROR \
             --severity=WARNING \
             .
-        env:
-          SEMGREP_SEND_METRICS: "off"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -85,7 +84,7 @@ jobs:
           if [[ "${{ needs.secret-scanning.result }}" != "success" || \
                 "${{ needs.sca.result }}"            != "success" || \
                 "${{ needs.sast.result }}"           != "success" ]]; then
-            echo "Security Gate FAILED"
+            echo "❌ Security Gate FAILED"
             exit 1
           fi
-          echo "Security Gate PASSED"
+          echo "✅ Security Gate PASSED"
