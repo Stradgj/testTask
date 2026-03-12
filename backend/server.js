@@ -1,6 +1,5 @@
 const express = require("express");
 const bodyParser = require("body-parser");
-const _ = require("lodash");
 
 const app = express();
 app.use(bodyParser.json());
@@ -22,7 +21,7 @@ let tasks = [
     id: 102,
     ownerId: 1,
     title: "Update SSL certificates",
-    description: "Keys are on the prod server: <b>root:mY_sUpEr_pAsS</b>",
+    description: "Certificate renewal task — see internal docs.",
     isPrivate: true,
   },
 ];
@@ -41,12 +40,20 @@ app.get("/api/tasks/:id", authMiddleware, (req, res) => {
 
   if (!task) return res.status(404).json({ error: "Task not found" });
 
+  const isOwner = task.ownerId === req.user.id;
+  const isAdmin = req.user.role === "admin";
+
+  if (task.isPrivate && !isOwner && !isAdmin) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
   res.json({ success: true, task });
 });
 
 app.get("/api/tasks", authMiddleware, (req, res) => {
   const visibleTasks = tasks.filter(
-    (t) => !t.isPrivate || t.ownerId === req.user.id,
+    (t) =>
+      !t.isPrivate || t.ownerId === req.user.id || req.user.role === "admin",
   );
   res.json({ success: true, tasks: visibleTasks });
 });
@@ -58,7 +65,6 @@ app.post("/api/tasks", authMiddleware, (req, res) => {
     id: tasks.length + 101,
     ownerId: req.user.id,
     title,
-
     description,
     isPrivate: isPrivate || false,
   };
@@ -74,10 +80,17 @@ app.post("/api/settings", authMiddleware, (req, res) => {
     view: "list",
   };
 
+  const ALLOWED_KEYS = ["theme", "notifications", "view"];
   const userSettings = req.body.settings || {};
 
-  const finalSettings = _.merge({}, defaultWorkspaceSettings, userSettings);
+  const safeSettings = {};
+  for (const key of ALLOWED_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(userSettings, key)) {
+      safeSettings[key] = userSettings[key];
+    }
+  }
 
+  const finalSettings = { ...defaultWorkspaceSettings, ...safeSettings };
   res.json({ success: true, settings: finalSettings });
 });
 

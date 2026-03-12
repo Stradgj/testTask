@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from "react";
+import DOMPurify from "dompurify";
 
 function App() {
-  const [currentUser, setCurrentUser] = useState(2); // По умолчанию мы обычный разработчик (ID: 2)
+  const [currentUser, setCurrentUser] = useState(2);
   const [tasks, setTasks] = useState([]);
-
-  // Форма новой задачи
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
 
-  // Загрузка доступных задач при смене юзера
   const fetchTasks = async () => {
     const res = await fetch("/api/tasks", {
       headers: { Authorization: currentUser },
@@ -21,7 +19,6 @@ function App() {
     fetchTasks();
   }, [currentUser]);
 
-  // Создание таски (Вектор для закидывания XSS)
   const handleCreateTask = async (e) => {
     e.preventDefault();
     await fetch("/api/tasks", {
@@ -41,7 +38,6 @@ function App() {
     fetchTasks();
   };
 
-  // Сохранение настроек (Вектор для Prototype Pollution)
   const handleSaveSettings = async () => {
     const settings = { theme: "light" };
     await fetch("/api/settings", {
@@ -88,7 +84,6 @@ function App() {
       </div>
 
       <div style={{ display: "flex", gap: "20px" }}>
-        {/* Список задач */}
         <div style={{ flex: 1 }}>
           <h2>Active Tasks</h2>
           {tasks.map((task) => (
@@ -103,16 +98,17 @@ function App() {
               <h3>
                 #{task.id} - {task.title}
               </h3>
-              {/* Уязвимость рендеринга: dangerouslySetInnerHTML без очистки */}
+
               <div
                 style={{ background: "#f5f5f5", padding: "10px" }}
-                dangerouslySetInnerHTML={{ __html: task.description }}
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(task.description),
+                }}
               />
             </div>
           ))}
         </div>
 
-        {/* Форма создания */}
         <div style={{ width: "300px", background: "#eee", padding: "15px" }}>
           <h2>New Task</h2>
           <form onSubmit={handleCreateTask}>
@@ -123,7 +119,7 @@ function App() {
               style={{ width: "100%", marginBottom: "10px", padding: "5px" }}
             />
             <textarea
-              placeholder="Description (Supports HTML logs)"
+              placeholder="Description (supports basic HTML)"
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
               style={{
