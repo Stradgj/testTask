@@ -11,11 +11,11 @@ jobs:
     name: Secret Scanning (Gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.2.2.2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: gitleaks/gitleaks-action@v2.3.9
+      - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -23,9 +23,9 @@ jobs:
     name: SCA (npm audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4.4.0
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
@@ -39,7 +39,7 @@ jobs:
         working-directory: ./backend
         run: npm audit --audit-level=high --json | tee npm-audit-report.json && npm audit --audit-level=high
 
-      - uses: actions/upload-artifact@v4.6.2
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: npm-audit-report
@@ -52,7 +52,7 @@ jobs:
     container:
       image: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v4
 
       - name: Semgrep scan
         run: |
@@ -66,7 +66,7 @@ jobs:
             --severity=WARNING \
             .
 
-      - uses: actions/upload-artifact@v4.6.2
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: semgrep-report
@@ -77,7 +77,7 @@ jobs:
     name: IDOR — Unguarded :id routes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v4
 
       - name: Check for routes missing ownership validation
         run: |
@@ -128,7 +128,7 @@ jobs:
     name: XSS — dangerouslySetInnerHTML without sanitizer
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v4
 
       - name: Check for unsanitized dangerouslySetInnerHTML
         run: |
@@ -146,12 +146,16 @@ jobs:
           fi
 
           for file in $FILES; do
+            TOTAL_LINES=$(wc -l < "$file")
             while IFS= read -r match; do
               LINE_NUM=$(echo "$match" | cut -d: -f1)
 
-              # Check 5 lines before the dangerous call for a sanitizer
+              # Check 5 lines before AND 3 lines after:
+              # sanitizer can appear either before (import/variable) or
+              # after (inline on the next line inside the JSX expression)
               START=$((LINE_NUM > 5 ? LINE_NUM - 5 : 1))
-              CONTEXT=$(sed -n "${START},${LINE_NUM}p" "$file")
+              END=$((LINE_NUM + 3 < TOTAL_LINES ? LINE_NUM + 3 : TOTAL_LINES))
+              CONTEXT=$(sed -n "${START},${END}p" "$file")
 
               HAS_SANITIZER=$(echo "$CONTEXT" | grep -E \
                 'DOMPurify\.sanitize|sanitizeHtml|xss\(|sanitize\(' \
@@ -186,7 +190,7 @@ jobs:
                 "${{ needs.sast.result }}"           != "success" || \
                 "${{ needs.idor-check.result }}"     != "success" || \
                 "${{ needs.xss-check.result }}"      != "success" ]]; then
-            echo "❌ Security Gate FAILED"
+            echo "Security Gate FAILED"
             echo ""
             echo "Job results:"
             echo "  secret-scanning : ${{ needs.secret-scanning.result }}"
@@ -196,4 +200,4 @@ jobs:
             echo "  xss-check       : ${{ needs.xss-check.result }}"
             exit 1
           fi
-          echo "✅ Security Gate PASSED"
+          echo "Security Gate PASSED"
