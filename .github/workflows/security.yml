@@ -73,18 +73,127 @@ jobs:
           path: semgrep-report.json
           retention-days: 30
 
+  idor-check:
+    name: IDOR — Unguarded :id routes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for routes missing ownership validation
+        run: |
+          set +e
+          FAILED=0
+
+          # Find all JS/TS files with Express :id routes
+          ROUTE_FILES=$(grep -rl 'app\.\(get\|post\|put\|patch\|delete\).*:[a-zA-Z]*[Ii][dD]' \
+            --include="*.js" --include="*.ts" . \
+            2>/dev/null || true)
+
+          if [ -z "$ROUTE_FILES" ]; then
+            echo "No :id routes found."
+            exit 0
+          fi
+
+          for file in $ROUTE_FILES; do
+            # Extract line numbers of :id routes
+            while IFS= read -r match; do
+              LINE_NUM=$(echo "$match" | cut -d: -f1)
+              ROUTE_DEF=$(echo "$match" | cut -d: -f2-)
+
+              # Grab the handler body (next 40 lines after the route definition)
+              HANDLER=$(tail -n +"$LINE_NUM" "$file" | head -40)
+
+              # Look for ownership checks
+              HAS_CHECK=$(echo "$HANDLER" | grep -E \
+                'ownerId\s*[!=]=+\s*req\.user|req\.user\.(id|role)\s*[!=]=|isAdmin|role\s*===\s*.admin' \
+                2>/dev/null || true)
+
+              if [ -z "$HAS_CHECK" ]; then
+                echo "::error file=$file,line=$LINE_NUM::IDOR: route '$ROUTE_DEF' has no ownership/role check. Add: task.ownerId === req.user.id or req.user.role === 'admin'"
+                FAILED=1
+              fi
+            done < <(grep -n 'app\.\(get\|post\|put\|patch\|delete\).*:[a-zA-Z]*[Ii][dD]' "$file")
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "IDOR check failed. Each route accepting an :id param must verify"
+            echo "that the requesting user owns the resource or has an admin role."
+            exit 1
+          fi
+
+          echo "IDOR check passed — all :id routes have ownership validation."
+
+  xss-check:
+    name: XSS — dangerouslySetInnerHTML without sanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for unsanitized dangerouslySetInnerHTML
+        run: |
+          set +e
+          FAILED=0
+
+          # Find JSX/TSX/JS files that use dangerouslySetInnerHTML
+          FILES=$(grep -rl 'dangerouslySetInnerHTML' \
+            --include="*.jsx" --include="*.tsx" --include="*.js" --include="*.ts" . \
+            2>/dev/null || true)
+
+          if [ -z "$FILES" ]; then
+            echo "No dangerouslySetInnerHTML usage found."
+            exit 0
+          fi
+
+          for file in $FILES; do
+            while IFS= read -r match; do
+              LINE_NUM=$(echo "$match" | cut -d: -f1)
+
+              # Check 5 lines before the dangerous call for a sanitizer
+              START=$((LINE_NUM > 5 ? LINE_NUM - 5 : 1))
+              CONTEXT=$(sed -n "${START},${LINE_NUM}p" "$file")
+
+              HAS_SANITIZER=$(echo "$CONTEXT" | grep -E \
+                'DOMPurify\.sanitize|sanitizeHtml|xss\(|sanitize\(' \
+                2>/dev/null || true)
+
+              if [ -z "$HAS_SANITIZER" ]; then
+                echo "::error file=$file,line=$LINE_NUM::XSS: dangerouslySetInnerHTML used without a sanitizer. Wrap the value with DOMPurify.sanitize() before rendering."
+                FAILED=1
+              fi
+            done < <(grep -n 'dangerouslySetInnerHTML' "$file")
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "XSS check failed. Install dompurify and use:"
+            echo "  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(value) }}"
+            exit 1
+          fi
+
+          echo "XSS check passed — all dangerouslySetInnerHTML calls are sanitized."
+
   security-gate:
     name: Security Gate
     runs-on: ubuntu-latest
-    needs: [secret-scanning, sca, sast]
+    needs: [secret-scanning, sca, sast, idor-check, xss-check]
     if: always()
     steps:
       - name: Check results
         run: |
           if [[ "${{ needs.secret-scanning.result }}" != "success" || \
                 "${{ needs.sca.result }}"            != "success" || \
-                "${{ needs.sast.result }}"           != "success" ]]; then
+                "${{ needs.sast.result }}"           != "success" || \
+                "${{ needs.idor-check.result }}"     != "success" || \
+                "${{ needs.xss-check.result }}"      != "success" ]]; then
             echo "❌ Security Gate FAILED"
+            echo ""
+            echo "Job results:"
+            echo "  secret-scanning : ${{ needs.secret-scanning.result }}"
+            echo "  sca             : ${{ needs.sca.result }}"
+            echo "  sast            : ${{ needs.sast.result }}"
+            echo "  idor-check      : ${{ needs.idor-check.result }}"
+            echo "  xss-check       : ${{ needs.xss-check.result }}"
             exit 1
           fi
           echo "✅ Security Gate PASSED"
