@@ -1,0 +1,38 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: ["main", "master"]
+
+jobs:
+  security-scans:
+    name: Security Checks (SCA & Secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks (Secret Scanning)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm install --package-lock-only
+
+      - name: SCA (npm audit)
+        working-directory: ./backend
+        run: npm audit --audit-level=high
+
+      - name: SAST (Semgrep)
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: "p/javascript"
